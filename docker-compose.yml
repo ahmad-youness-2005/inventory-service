@@ -1,0 +1,13 @@
+services:
+  api:
+    build: .
+    image: inventory-service:latest
+    container_name: inventory-service
+    ports:
+      - "8080:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      ConnectionStrings__InventoryDb: ${INVENTORY_DB_CONNECTION}
+      Auth__ApiKey: ${API_KEY}
+      Reservations__ExpiryMinutes: ${RESERVATION_EXPIRY_MINUTES:-15}
+    restart: unless-stopped

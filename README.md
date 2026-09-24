@@ -115,6 +115,9 @@ inventory-service/
 │   │   └── Migrations/           # EF Core migrations (already created, just apply them)
 │   └── Program.cs
 ├── tests/InventoryService.Api.Tests/  # integration tests against a real PostgreSQL (Docker)
+├── Dockerfile
+├── docker-compose.yml
+├── .env.example                  # template for the settings docker compose reads
 ├── InventoryService.slnx
 └── global.json                   # pins the .NET 10 SDK
 ```
@@ -125,7 +128,7 @@ inventory-service/
 
 - [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) (`dotnet --version` should show `10.x`)
 - A Supabase project
-- Docker (only for running the tests)
+- Docker (for running the tests or the container)
 
 ### 1. Restore packages and tools
 
@@ -182,6 +185,18 @@ dotnet run --project src/InventoryService.Api
 ```
 
 - Health check: http://localhost:5080/health (also checks the database)
+
+  ```json
+  {
+    "status": "Healthy",
+    "totalDurationMs": 12.4,
+    "checks": [
+      { "name": "database", "status": "Healthy", "description": null, "durationMs": 11.9 }
+    ]
+  }
+  ```
+
+  Returns `200` when healthy and `503` when the database can't be reached.
 - Swagger UI: http://localhost:5080/swagger
 - OpenAPI spec: http://localhost:5080/openapi/v1.json
 
@@ -198,6 +213,37 @@ In Swagger, click **Authorize** and paste your API key first; it is remembered a
 
 In production, set these as environment variables, using `__` instead of `:`
 (e.g. `ConnectionStrings__InventoryDb`, `Reservations__ExpiryMinutes`, `Auth__ApiKey`).
+
+## Run with Docker
+
+1. Copy the settings template and fill in your values:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+   `.env` is git-ignored, so the connection string and key never get committed.
+   If your password contains a `$`, write it as `$$`.
+
+2. Build and start:
+
+   ```bash
+   docker compose up --build
+   ```
+
+3. Check it:
+
+   ```bash
+   curl http://localhost:8080/health
+   curl -H "X-Api-Key: <your key>" http://localhost:8080/uoms
+   ```
+
+   With `ASPNETCORE_ENVIRONMENT=Development`, Swagger is at http://localhost:8080/swagger.
+   Set it to `Production` (the default) to turn Swagger off.
+
+The container does not run migrations. Apply them from your machine with `dotnet ef database update` before starting a new database.
+
+Stop it with `docker compose down`.
 
 ## API
 
@@ -334,7 +380,8 @@ dotnet test      # Docker (or OrbStack / Colima) must be running
 - [x] Row Level Security
 - [x] API key authentication
 - [x] Integration tests
-- [ ] Docker image, CI pipeline
+- [x] Docker image
+- [ ] CI pipeline
 - [ ] Swagger: show enums as text, mark required fields
 
 ## License

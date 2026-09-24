@@ -4,6 +4,7 @@ using InventoryService.Api.Data;
 using InventoryService.Api.Errors;
 using InventoryService.Api.Services;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi;
 
@@ -86,7 +87,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers().RequireAuthorization();
-app.MapHealthChecks("/health");
+app.MapHealthChecks("/health", new HealthCheckOptions { ResponseWriter = HealthResponseWriter.WriteAsync });
 
 app.Run();
 
