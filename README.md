@@ -114,7 +114,8 @@ inventory-service/
 │   │   ├── Configurations/       # one file per table: keys, lengths, constraints
 │   │   └── Migrations/           # EF Core migrations (already created, just apply them)
 │   └── Program.cs
-├── tests/InventoryService.Api.Tests/  # integration tests against a real PostgreSQL (Docker)
+├── tests/InventoryService.Api.Tests/      # integration tests against a real PostgreSQL (Docker)
+├── tests/InventoryService.Api.UnitTests/  # unit tests for the calculations and rules, no database
 ├── Dockerfile
 ├── docker-compose.yml
 ├── .env.example                  # template for the settings docker compose reads
@@ -153,7 +154,7 @@ dotnet user-secrets set "ConnectionStrings:InventoryDb" \
 
 ### 3. Set the API key
 
-Every endpoint (except `/health`) requires an `X-Api-Key` header, and the app refuses to start without a key.
+Outside `Development`, every endpoint (except `/health`) requires an `X-Api-Key` header, and the app refuses to start without a key.
 Create a long random one and save it as a user secret:
 
 ```bash
@@ -210,6 +211,7 @@ In Swagger, click **Authorize** and paste your API key first; it is remembered a
 | `ConnectionStrings:InventoryDb` | user secret / environment variable | none (required) | Supabase / PostgreSQL connection. The app refuses to start without it. |
 | `Reservations:ExpiryMinutes` | `appsettings.json` | `15` | How long an unpaid reservation holds stock. Allowed 1–1440; anything else stops the app at startup. |
 | `Auth:ApiKey` | user secret / environment variable | none (required) | Shared secret callers send in the `X-Api-Key` header. At least 16 characters; the app refuses to start without it. |
+| `Auth:Enabled` | `appsettings.*.json` / environment variable | `true` (`false` in Development) | Turns the API key check on or off. Never set it to `false` in production. |
 
 In production, set these as environment variables, using `__` instead of `:`
 (e.g. `ConnectionStrings__InventoryDb`, `Reservations__ExpiryMinutes`, `Auth__ApiKey`).
@@ -342,6 +344,10 @@ curl -H "X-Api-Key: <your key>" http://localhost:5080/uoms
 Callers (the shop, the warehouse app...) authenticate with a shared secret in the `X-Api-Key` header.
 The code is in `Auth/ApiKeyAuthentication.cs` and is switched on in `Program.cs` for every controller.
 
+In the `Development` environment the key is **off** (`"Auth": { "Enabled": false }` in `appsettings.Development.json`),
+so you can call the API locally without a header. The app logs a warning at startup when it is off.
+Every other environment, including the tests, requires the key. To try the key locally, set `Auth:Enabled` to `true`.
+
 | Request | Result |
 |---|---|
 | No `X-Api-Key` header | `401` |
@@ -366,8 +372,13 @@ oversell, retries don't hold twice, multi-item orders are all or nothing, confir
 every stock change appears in the history with the right totals, and requests without a valid API key are refused.
 They never touch Supabase.
 
+Unit tests (`tests/InventoryService.Api.UnitTests`) cover the calculations and rules on their own, without a database:
+unit conversion and overflow, merging order lines, the stock change for each reservation step,
+the API key check, and how errors map to `400` / `404` / `409`. They run in about a second and don't need Docker.
+
 ```bash
-dotnet test      # Docker (or OrbStack / Colima) must be running
+dotnet test                                          # everything; Docker must be running
+dotnet test tests/InventoryService.Api.UnitTests     # unit tests only, no Docker needed
 ```
 
 ## Roadmap

@@ -139,7 +139,7 @@ public sealed class ReservationService(
 
         await stockService.RecordMovementsAsync(
             StockMovementType.Reserved,
-            lines.Select(l => new StockChange(l.ItemId, 0, l.Pieces)).ToList(),
+            lines.Select(l => ReservationCalculator.StockChangeFor(ReservationStatus.Pending, l.ItemId, l.Pieces)).ToList(),
             now, ct, reservationId: reservation.Id);
 
         await transaction.CommitAsync(ct);
@@ -192,20 +192,9 @@ public sealed class ReservationService(
             }
         }
 
-        var movementType = newStatus switch
-        {
-            ReservationStatus.Confirmed => StockMovementType.Confirmed,
-            ReservationStatus.Released => StockMovementType.Released,
-            _ => StockMovementType.Expired
-        };
-
         await stockService.RecordMovementsAsync(
-            movementType,
-            lines
-                .Select(l => newStatus == ReservationStatus.Confirmed
-                    ? new StockChange(l.ItemId, -l.Quantity, -l.Quantity)
-                    : new StockChange(l.ItemId, 0, -l.Quantity))
-                .ToList(),
+            ReservationCalculator.MovementTypeFor(newStatus),
+            lines.Select(l => ReservationCalculator.StockChangeFor(newStatus, l.ItemId, l.Quantity)).ToList(),
             now, ct, reservationId: id);
 
         await transaction.CommitAsync(ct);
@@ -216,22 +205,16 @@ public sealed class ReservationService(
     private async Task<IReadOnlyList<RequestedLine>> ToPiecesAsync(
         IReadOnlyList<ReservationLineRequest> requestLines, CancellationToken ct)
     {
-        var totals = new Dictionary<Guid, long>();
+        var converted = new List<RequestedLine>(requestLines.Count);
 
         foreach (var line in requestLines)
         {
             var itemId = line.ItemId!.Value;
             var pieces = await stockService.ConvertToPiecesAsync(itemId, line.UomId, line.Quantity, ct);
-            totals[itemId] = totals.GetValueOrDefault(itemId) + pieces;
+            converted.Add(new RequestedLine(itemId, pieces));
         }
 
-        if (totals.Values.Any(pieces => pieces > int.MaxValue))
-            throw new BadRequestException("Quantity is too large.");
-
-        return totals
-            .OrderBy(t => t.Key)
-            .Select(t => new RequestedLine(t.Key, (int)t.Value))
-            .ToList();
+        return ReservationCalculator.Merge(converted);
     }
 
     private Task<ReservationResponse?> FindActiveAsync(string orderReference, CancellationToken ct) =>
@@ -244,12 +227,7 @@ public sealed class ReservationService(
 
     private static ReservationResponse EnsureSameLines(ReservationResponse existing, IReadOnlyList<RequestedLine> requested)
     {
-        var sameLines = existing.Lines
-            .OrderBy(l => l.ItemId)
-            .Select(l => new RequestedLine(l.ItemId, l.Quantity))
-            .SequenceEqual(requested);
-
-        if (sameLines)
+        if (ReservationCalculator.HasSameLines(existing.Lines, requested))
             return existing;
 
         throw new ConflictException(
@@ -291,6 +269,4 @@ public sealed class ReservationService(
             r.ExpiresAt,
             r.CreatedAt,
             r.UpdatedAt);
-
-    private sealed record RequestedLine(Guid ItemId, int Pieces);
 }

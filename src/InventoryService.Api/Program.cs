@@ -5,6 +5,7 @@ using InventoryService.Api.Errors;
 using InventoryService.Api.Services;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.OpenApi;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi;
 
@@ -35,34 +36,26 @@ builder.Services.AddControllers()
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<ApiExceptionHandler>();
 
-builder.Services.AddOptions<ApiKeyOptions>()
-    .BindConfiguration(ApiKeyOptions.SectionName)
-    .ValidateDataAnnotations()
-    .ValidateOnStart();
+var authEnabled = builder.Configuration.GetValue("Auth:Enabled", true);
 
-builder.Services.AddAuthentication(ApiKeyDefaults.Scheme)
-    .AddScheme<AuthenticationSchemeOptions, ApiKeyAuthenticationHandler>(ApiKeyDefaults.Scheme, null);
+if (authEnabled)
+{
+    builder.Services.AddOptions<ApiKeyOptions>()
+        .BindConfiguration(ApiKeyOptions.SectionName)
+        .ValidateDataAnnotations()
+        .ValidateOnStart();
+
+    builder.Services.AddAuthentication(ApiKeyDefaults.Scheme)
+        .AddScheme<AuthenticationSchemeOptions, ApiKeyAuthenticationHandler>(ApiKeyDefaults.Scheme, null);
+}
+
 builder.Services.AddAuthorization();
 
-builder.Services.AddOpenApi(options => options.AddDocumentTransformer((document, _, _) =>
+builder.Services.AddOpenApi(options =>
 {
-    document.Components ??= new OpenApiComponents();
-    document.Components.SecuritySchemes ??= new Dictionary<string, IOpenApiSecurityScheme>();
-    document.Components.SecuritySchemes[ApiKeyDefaults.Scheme] = new OpenApiSecurityScheme
-    {
-        Type = SecuritySchemeType.ApiKey,
-        In = ParameterLocation.Header,
-        Name = ApiKeyDefaults.HeaderName
-    };
-
-    document.Security ??= [];
-    document.Security.Add(new OpenApiSecurityRequirement
-    {
-        [new OpenApiSecuritySchemeReference(ApiKeyDefaults.Scheme, document)] = []
-    });
-
-    return Task.CompletedTask;
-}));
+    if (authEnabled)
+        options.AddDocumentTransformer(AddApiKeySecurity);
+});
 
 builder.Services.AddHealthChecks()
     .AddCheck<DatabaseHealthCheck>("database");
@@ -83,12 +76,40 @@ if (app.Environment.IsDevelopment())
     });
 }
 
-app.UseAuthentication();
-app.UseAuthorization();
+if (authEnabled)
+{
+    app.UseAuthentication();
+    app.UseAuthorization();
+    app.MapControllers().RequireAuthorization();
+}
+else
+{
+    app.Logger.LogWarning("API key authentication is disabled (Auth:Enabled = false). Every endpoint is open.");
+    app.MapControllers();
+}
 
-app.MapControllers().RequireAuthorization();
 app.MapHealthChecks("/health", new HealthCheckOptions { ResponseWriter = HealthResponseWriter.WriteAsync });
 
 app.Run();
+
+static Task AddApiKeySecurity(OpenApiDocument document, OpenApiDocumentTransformerContext context, CancellationToken ct)
+{
+    document.Components ??= new OpenApiComponents();
+    document.Components.SecuritySchemes ??= new Dictionary<string, IOpenApiSecurityScheme>();
+    document.Components.SecuritySchemes[ApiKeyDefaults.Scheme] = new OpenApiSecurityScheme
+    {
+        Type = SecuritySchemeType.ApiKey,
+        In = ParameterLocation.Header,
+        Name = ApiKeyDefaults.HeaderName
+    };
+
+    document.Security ??= [];
+    document.Security.Add(new OpenApiSecurityRequirement
+    {
+        [new OpenApiSecuritySchemeReference(ApiKeyDefaults.Scheme, document)] = []
+    });
+
+    return Task.CompletedTask;
+}
 
 public partial class Program { }

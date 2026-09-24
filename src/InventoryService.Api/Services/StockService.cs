@@ -71,12 +71,11 @@ public sealed class StockService(InventoryDbContext db)
             ?? throw new NotFoundException($"Item '{itemId}' was not found.");
 
         var units = row.Units
-            .Select(u => new StockInUnit(
-                u.UomId,
-                u.UomName,
-                u.QuantityPerUnit,
-                FullUnits: row.Quantity / u.QuantityPerUnit,
-                RemainingPieces: row.Quantity % u.QuantityPerUnit))
+            .Select(u =>
+            {
+                var (fullUnits, remainingPieces) = UnitConversion.Split(row.Quantity, u.QuantityPerUnit);
+                return new StockInUnit(u.UomId, u.UomName, u.QuantityPerUnit, fullUnits, remainingPieces);
+            })
             .ToList();
 
         return new StockResponse(
@@ -180,11 +179,7 @@ public sealed class StockService(InventoryDbContext db)
                     $"Unit '{id}' is not linked to this item. Link it first with POST /items/{itemId}/uoms.");
         }
 
-        var pieces = (long)quantity * quantityPerUnit;
-        if (pieces > int.MaxValue)
-            throw new BadRequestException("Quantity is too large.");
-
-        return (int)pieces;
+        return UnitConversion.ToPieces(quantity, quantityPerUnit);
     }
 
     public async Task<string> BuildInsufficientStockMessageAsync(Guid itemId, int requestedPieces, CancellationToken ct)
